@@ -1,0 +1,27 @@
+# Secrets and server data (.env.prod, .env.bak and similar copies included)
+.env
+.env.*
+!.env.example
+deploy/secrets/
+deploy/backups/
+/secrets/
+/backups/
+*.pem
+*.key
+*.dump
+*.sql.gz
+*.log
+
+# Build and test output (go build on Windows writes api.exe to the repo root)
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
