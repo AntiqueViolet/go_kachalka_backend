@@ -1,0 +1,71 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# The jobs only read the repository.
+permissions:
+  contents: read
+
+# A newer push to the same branch or PR supersedes the running checks.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Generated code and go.mod are up to date
+        run: |
+          go generate ./...
+          docker run --rm -v "$PWD:/src" -w /src sqlc/sqlc:1.31.1 generate
+          go mod tidy -diff
+          # porcelain also lists new files that a generator created but nobody committed
+          test -z "$(git status --porcelain)" || { git status --short; git diff; exit 1; }
+
+      - name: Vet
+        run: go vet ./... && go vet -tags e2e ./e2e/
+
+      - name: Test (unit + Postgres via testcontainers)
+        run: go test -race ./...
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.14.0
+
+      - name: Vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Start dev stack
+        run: docker compose up --build -d --wait
+      - name: Smoke test
+        run: go test -tags e2e -count=1 ./e2e/
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs
+      - name: Stop
+        if: always()
+        run: docker compose down -v

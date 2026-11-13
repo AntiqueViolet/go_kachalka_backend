@@ -1,0 +1,33 @@
+version: "2"
+
+run:
+  build-tags: [e2e] # lint the end-to-end test too
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - bodyclose
+    - errorlint
+    - gosec
+    - misspell
+    - noctx
+    - unconvert
+  settings:
+    gosec:
+      excludes:
+        - G115 # integer conversions: lengths and generations are bounded by construction
+        - G304 # file paths come from operator configuration and CLI flags, not from requests
+  exclusions:
+    generated: lax
+    rules:
+      - path: _test\.go
+        linters: [gosec, noctx, errcheck]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/AntiqueViolet/go_kachalka_backend
