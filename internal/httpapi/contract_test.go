@@ -1,16 +1,18 @@
 package httpapi
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/AntiqueViolet/go_kachalka_backend/internal/httpapi/oapi"
+	"github.com/getkin/kin-openapi/openapi3"
 )
 
 // TestContractMatchesMiddlewareTables keeps protectedOps and the limiter map in sync with
-// api/openapi.yaml (embedded into the generated code).
+// api/openapi.yaml. The spec is read from disk, not embedded: the server binary does not need
+// an OpenAPI parser.
 func TestContractMatchesMiddlewareTables(t *testing.T) {
-	spec, err := oapi.GetSpec()
+	spec, err := openapi3.NewLoader().LoadFromFile(filepath.Join("..", "..", "api", "openapi.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
