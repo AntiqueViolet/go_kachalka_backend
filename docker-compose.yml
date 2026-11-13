@@ -1,0 +1,55 @@
+# Local development stack: `docker compose up --build`.
+# API: http://localhost:8080, emails: http://localhost:8025, SMS codes: `docker compose logs api`.
+name: go-kachalka-dev
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: kachalka
+      POSTGRES_USER: kachalka
+      POSTGRES_PASSWORD: kachalka
+    ports:
+      - "127.0.0.1:5432:5432" # localhost only: the dev password is public
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # -h 127.0.0.1: check TCP; the unix socket answers during initdb, before the real start.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U kachalka -d kachalka"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  mailpit:
+    image: axllent/mailpit:v1.32
+    ports:
+      - "127.0.0.1:8025:8025" # web UI and REST API (shows the codes)
+      - "127.0.0.1:1025:1025" # SMTP
+
+  api:
+    build: .
+    # The server drains for up to 20s on SIGTERM (shutdownTimeout); Docker's default 10s would SIGKILL it.
+    stop_grace_period: 25s
+    environment:
+      APP_ENV: dev
+      DATABASE_URL: postgres://kachalka:kachalka@postgres:5432/kachalka?sslmode=disable
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_TLS: none
+      SMTP_FROM: noreply@kachalka.local
+      LOG_LEVEL: debug
+      # Relaxed limits so the mobile app can be tested repeatedly from one machine.
+      RATE_CODE_COOLDOWN: 5s
+      RATE_CODES_PER_TARGET_PER_HOUR: "100"
+      RATE_CODES_PER_IP_PER_HOUR: "1000"
+      RATE_LOGIN_PER_IP_PER_MINUTE: "1000"
+    ports:
+      - "8080:8080" # all interfaces: a phone on the same Wi-Fi can reach the API
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+
+volumes:
+  pgdata:
