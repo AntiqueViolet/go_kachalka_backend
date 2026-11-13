@@ -1,0 +1,19 @@
+# Not needed to build the binaries.
+.git
+.github
+docs
+deploy
+e2e
+**/*_test.go
+*.md
+Dockerfile
+docker-compose.yml
+.golangci.yml
+# Secrets and data must never reach the build context, wherever they lie.
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.dump
+**/secrets
+**/backups
