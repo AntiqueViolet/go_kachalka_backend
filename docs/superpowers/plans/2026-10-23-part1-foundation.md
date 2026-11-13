@@ -6,7 +6,7 @@
 
 **Architecture:** Маленькие пакеты в `internal/` с одной ответственностью и unit-тестами без внешних зависимостей. Время подменяется через `clock.Clock`, ключи и параметры передаются явно — пакеты не читают окружение сами (кроме `config`). Конструкторы, которые получают уже проверенный `config`, паникуют на заведомо неверных аргументах (ошибка программиста); всё, что может не получиться во время работы, возвращает ошибку.
 
-**Tech Stack:** Go 1.27 (toolchain 1.27.3), `golang.org/x/crypto/argon2`, `golang.org/x/text` (NFKC), `google/uuid`, `crypto/hkdf`, `golang-jwt/jwt/v5` (EdDSA), `nyaruka/phonenumbers`, `wneessen/go-mail`, `caarlos0/env/v11`.
+**Tech Stack:** Go 1.27 (toolchain 1.27.4), `golang.org/x/crypto/argon2`, `golang.org/x/text` (NFKC), `google/uuid`, `crypto/hkdf`, `golang-jwt/jwt/v5` (EdDSA), `nyaruka/phonenumbers`, `wneessen/go-mail`, `caarlos0/env/v11`.
 
 **Спецификация:** `docs/superpowers/specs/2026-10-22-auth-backend-design.md`
 **Части плана:** 1 — фундамент (этот файл) → 2 — БД, сервисы, HTTP API → 3 — комплект поставки. Каждая часть заканчивается рабочим, протестированным кодом.
@@ -16,7 +16,7 @@
 ## Правила выполнения
 
 - **Коммиты и push делает только владелец репозитория.** На шагах «Контрольная точка» исполнитель не запускает `git commit`/`git push`, а выдаёт владельцу готовые команды из шага и ждёт подтверждения.
-- Весь код в шагах заранее собран и прогнан тестами (Windows, Go 1.27.3, Docker Desktop). Переносите файлы как есть; если тест ведёт себя не так, как написано в шаге, — остановитесь и разберитесь, а не подгоняйте код.
+- Весь код в шагах заранее собран и прогнан тестами (Windows, Go 1.27.4, Docker Desktop). Переносите файлы как есть; если тест ведёт себя не так, как написано в шаге, — остановитесь и разберитесь, а не подгоняйте код.
 - Команды выполняются из корня репозитория в PowerShell или Git Bash, если не сказано иное.
 - Версии зависимостей фиксируются командами `go get пакет@версия` — именно с ними код проверен.
 
@@ -25,7 +25,7 @@
 | Файл | Ответственность |
 |---|---|
 | `.gitattributes`, `.gitignore` | LF в репозитории; секреты и данные сервера не попадают в git |
-| `go.mod` | модуль `github.com/AntiqueViolet/go_kachalka_backend`, Go 1.27, toolchain 1.27.3 |
+| `go.mod` | модуль `github.com/AntiqueViolet/go_kachalka_backend`, Go 1.27, toolchain 1.27.4 |
 | `internal/clock/` | текущее время; `Fake` для тестов |
 | `internal/apperr/` | ошибки для клиента со стабильными кодами (RFC 9457) |
 | `internal/contact/` | нормализация телефона (E.164, только мобильные) и email |
@@ -89,13 +89,13 @@ desktop.ini
 
 ```bash
 go mod init github.com/AntiqueViolet/go_kachalka_backend
-go mod edit -go=1.27.0 -toolchain=go1.27.3
+go mod edit -go=1.27.0 -toolchain=go1.27.4
 ```
 
 - [ ] **Step 4: Проверить версию**
 
 Run: `go version`
-Expected: `go version go1.27.3 ...` (при первом запуске Go сам скачает toolchain 1.27.3: в нём закрыты уязвимости stdlib, которые находит `govulncheck`).
+Expected: `go version go1.27.4 ...` (при первом запуске Go сам скачает toolchain 1.27.4: в нём закрыты уязвимости stdlib, которые находит `govulncheck`).
 
 - [ ] **Step 5: Контрольная точка** — выдать владельцу команды:
 

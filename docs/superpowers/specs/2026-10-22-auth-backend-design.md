@@ -329,7 +329,7 @@ RFC 9457, `Content-Type: application/problem+json`:
 
 ## 12. Стек и структура проекта
 
-Go 1.27 (toolchain 1.27.3 — в нём закрыты уязвимости stdlib, найденные `govulncheck`), `net/http` (маршрутизация стандартной библиотеки), `log/slog` (JSON), `jackc/pgx/v5`, `sqlc`, `pressly/goose/v3` (миграции встроены через `embed`, применяются при старте), `oapi-codegen` (strict server), `golang-jwt/jwt/v5`, `golang.org/x/crypto/argon2`, `golang.org/x/text` (NFKC), `crypto/hkdf` (stdlib), `nyaruka/phonenumbers`, `wneessen/go-mail`, `google/uuid` (v7), `caarlos0/env`.
+Go 1.27 (toolchain 1.27.4 — в нём закрыты уязвимости stdlib, найденные `govulncheck`), `net/http` (маршрутизация стандартной библиотеки), `log/slog` (JSON), `jackc/pgx/v5`, `sqlc`, `pressly/goose/v3` (миграции встроены через `embed`, применяются при старте), `oapi-codegen` (strict server), `golang-jwt/jwt/v5`, `golang.org/x/crypto/argon2`, `golang.org/x/text` (NFKC), `crypto/hkdf` (stdlib), `nyaruka/phonenumbers`, `wneessen/go-mail`, `google/uuid` (v7), `caarlos0/env`.
 
 ```
 cmd/
@@ -378,9 +378,9 @@ README.md
 ## 14. Комплект поставки
 
 **Локально** — `docker-compose.yml`:
-- `postgres` (порт 5432 наружу для отладки);
-- `mailpit` (SMTP 1025, веб-интерфейс `http://localhost:8025`);
-- `api` (`APP_ENV=dev`, `SMS_PROVIDER=log`, коды SMS видны в `docker compose logs api`).
+- `postgres` (порт 5432 только на localhost, для отладки);
+- `mailpit` (SMTP 1025, веб-интерфейс `http://localhost:8025`, только localhost);
+- `api` (`APP_ENV=dev`, `SMS_PROVIDER=log`, коды SMS видны в `docker compose logs api`; порт 8080 доступен из локальной сети — для проверки на телефоне).
 
 Запуск одной командой `docker compose up --build`, без ручной генерации ключей. Лимиты на отправку кодов в dev ослаблены, чтобы приложение можно было многократно проверять с одной машины.
 
@@ -441,7 +441,7 @@ README.md
 - Интерфейсы отправителей: `SendSMS` и `SendEmail` (один тип может реализовать оба).
 - Индексы `verification_codes`: по `(target, created_at)` для лимитов и по `(user_id, purpose, created_at)` для поиска кода пользователя.
 - Пакеты: `contact/` вместо `phone/`; добавлены `codes/`, `app/`, `apperr/`, `store/storetest/`, `e2e/`.
-- Toolchain Go 1.27.3 и `moby/go-archive` v0.3.3: закрывают уязвимости, найденные `govulncheck`.
+- Toolchain Go 1.27.4, `moby/go-archive` v0.3.3 и `klauspost/compress` v1.20.2: закрывают уязвимости, найденные `govulncheck` (по состоянию на 2026-11-14).
 - Prod-compose: `deploy/compose.yaml`; Caddy с фиксированным IP, только ему API доверяет `X-Forwarded-For`.
 - Сервер при старте ждёт БД до 30 секунд; healthcheck Postgres идёт по TCP (через сокет он отвечает ещё во время initdb).
 - Refresh-токен декодируется строго (canonical base64): у токена ровно одно допустимое написание.
@@ -454,3 +454,4 @@ README.md
 - По ревью: границы настроек, при которых опечатка тихо ослабляла защиту (раздел 11): `ACCESS_TOKEN_TTL` ≤ 1h, `REFRESH_GRACE` ≤ 5m, `PASSWORD_HASH_CONCURRENCY` ≤ 64, окно неудачных входов ≥ 1m, `TRUSTED_PROXIES` без `/0`, публичный dev-секрет (в любом написании) и нулевая пауза между кодами в prod запрещены, `SMS_APP_HASH` — ровно 11 символов; `Config` не печатает секреты.
 - По итоговому ревью части 1: `REFRESH_GRACE=0` выключает повтор полностью (у допуска на сдвиг часов своя константа); длина пароля считается после NFKC; в `APP_NAME` — только печатные символы; вложенные `config.SMTP`, `config.Keys` и `notify.SMTPConfig` тоже печатаются без секретов; `.gitignore` закрывает ключи, дампы и логи.
 - По ревью части 2: миграции под сессионной блокировкой goose (параллельный старт нескольких экземпляров падал на `CREATE EXTENSION`); выдача кода под блокировкой адреса, недоставленный код удаляется; вход блокирует строку пользователя (точный лимит сессий, сброс пароля не пропускает новую сессию), повторное хэширование — только если пароль не сменился; `password/forgot` шлёт письмо в фоне, `password/reset` отвечает одним `invalid_code`; лимит на неверный текущий пароль в профиле; таймаут запроса 12 с, авторизация раньше лимитов по IP; порт открывается после миграций.
+- По ревью части 3: бэкапы удаляются только после удачного дампа, три последних остаются всегда, healthcheck `backup` показывает сбой; контейнер API только для чтения и без capabilities; Caddy режет тела больше 128 КБ и ставит `nosniff`; `.dockerignore` не пускает секреты в контекст сборки; dev-Postgres и Mailpit только на localhost; CI с минимальными правами, таймаутами и проверкой незакоммиченных сгенерированных файлов; e2e проверяет ротацию refresh и выход со всех устройств; Go 1.27.4 и `klauspost/compress` v1.20.2 — новые уязвимости; встроенная в бинарник OpenAPI-спецификация убрана (тест контракта читает `api/openapi.yaml`).
