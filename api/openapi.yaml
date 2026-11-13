@@ -1,0 +1,474 @@
+openapi: 3.0.3
+info:
+  title: go_kachalka API
+  version: 1.0.0
+  description: |
+    Авторизация мобильного приложения: регистрация по телефону (SMS-код), вход по телефону и паролю,
+    подтверждение email и сброс пароля кодом из письма.
+
+    Ошибки возвращаются в формате RFC 9457 (`application/problem+json`). Клиент ориентируется на поле
+    `code` — оно стабильно; `title` предназначен для людей и может меняться. На `429` приходит заголовок
+    `Retry-After` (секунды).
+
+    Защищённые методы требуют `Authorization: Bearer <access_token>`. При `401 unauthorized` клиент
+    обновляет токены через `/v1/auth/refresh`; при `invalid_refresh_token` и `refresh_token_reused` —
+    отправляет пользователя на экран входа. `403 wrong_password` — неверный пароль в операции профиля,
+    токены при этом не трогать.
+servers:
+  - url: http://localhost:8080
+    description: Локальный docker compose
+
+paths:
+  /v1/auth/register/start:
+    post:
+      operationId: registerStart
+      summary: Шаг 1 регистрации — отправить SMS-код на номер
+      description: Ошибки — `409 phone_taken`, `422 validation_failed`, `429 rate_limited`, `503 service_unavailable` (SMS не ушла).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterStartRequest' }
+      responses:
+        '202':
+          description: Код отправлен
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegisterStartResponse' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /v1/auth/register/verify:
+    post:
+      operationId: registerVerify
+      summary: Шаг 2 регистрации — проверить SMS-код
+      description: Ошибки — `422 invalid_code` (есть `attempts_left`), `410 code_expired`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterVerifyRequest' }
+      responses:
+        '200':
+          description: Номер подтверждён
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegisterVerifyResponse' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /v1/auth/register:
+    post:
+      operationId: register
+      summary: Шаг 3 регистрации — создать аккаунт
+      description: |
+        На email уходит код подтверждения. Ошибки — `401 invalid_registration_token`, `409 phone_taken`,
+        `422 validation_failed`, `503 service_unavailable` (сервер перегружен — все слоты хеширования паролей заняты, повторите позже).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201':
+          description: Аккаунт создан, пользователь вошёл
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResult' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /v1/auth/login:
+    post:
+      operationId: login
+      summary: Вход по телефону и паролю
+      description: Ошибки — `401 invalid_credentials`, `422 validation_failed`, `429 rate_limited`, `503 service_unavailable` (сервер перегружен — все слоты хеширования паролей заняты, повторите позже).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Вход выполнен
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResult' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /v1/auth/refresh:
+    post:
+      operationId: refresh
+      summary: Обновить пару токенов
+      description: |
+        Каждый вызов выдаёт новый refresh-токен, старый перестаёт работать. Повтор старого токена в течение
+        30 секунд (потерянный ответ) возвращает тот же новый токен. Ошибки — `401 invalid_refresh_token`,
+        `401 refresh_token_reused`, `429 rate_limited`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '200':
+          description: Новые токены
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RefreshResponse' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /v1/auth/logout:
+    post:
+      operationId: logout
+      summary: Выйти на этом устройстве или на всех
+      security: [ { bearerAuth: [] } ]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LogoutRequest' }
+      responses:
+        '204': { description: Сессия завершена }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /v1/auth/password/forgot:
+    post:
+      operationId: forgotPassword
+      summary: Запросить код сброса пароля на подтверждённый email
+      description: Ответ одинаковый, есть такой email или нет.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ForgotPasswordRequest' }
+      responses:
+        '202':
+          description: Если email подтверждён у какого-то аккаунта, на него ушёл код
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ForgotPasswordResponse' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /v1/auth/password/reset:
+    post:
+      operationId: resetPassword
+      summary: Установить новый пароль по коду из письма
+      description: |
+        Все сессии пользователя отзываются, нужно войти заново.
+        Ошибки — `422 invalid_code` без `attempts_left` — для любой ошибки кода (неверный, просроченный, израсходованный, неизвестный адрес): ответ не раскрывает, зарегистрирован ли адрес; `422 validation_failed`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResetPasswordRequest' }
+      responses:
+        '204': { description: Пароль изменён }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /v1/me:
+    get:
+      operationId: getMe
+      summary: Текущий пользователь
+      security: [ { bearerAuth: [] } ]
+      responses:
+        '200':
+          description: Профиль
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        default: { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: deleteMe
+      summary: Удалить аккаунт
+      description: Данные удаляются полностью. Ошибки — `403 wrong_password`, `429 rate_limited` (слишком много неверных паролей).
+      security: [ { bearerAuth: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeleteAccountRequest' }
+      responses:
+        '204': { description: Аккаунт удалён }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /v1/me/email:
+    put:
+      operationId: changeEmail
+      summary: Сменить email (требует пароль)
+      description: Новый email не подтверждён, на него уходит код. Ошибки — `403 wrong_password`, `409 email_already_verified`, `422 validation_failed`, `429 rate_limited` (лимит отправки кодов или слишком много неверных паролей).
+      security: [ { bearerAuth: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChangeEmailRequest' }
+      responses:
+        '202':
+          description: Email изменён, код отправлен
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChangeEmailResponse' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /v1/me/email/verify:
+    post:
+      operationId: verifyEmail
+      summary: Подтвердить email кодом из письма
+      description: Ошибки — `422 invalid_code`, `410 code_expired`, `409 email_taken`, `409 email_already_verified`.
+      security: [ { bearerAuth: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VerifyEmailRequest' }
+      responses:
+        '200':
+          description: Email подтверждён
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /v1/me/email/resend:
+    post:
+      operationId: resendEmailCode
+      summary: Отправить код подтверждения email ещё раз
+      description: Ошибки — `409 email_already_verified`, `429 rate_limited`, `503 service_unavailable`.
+      security: [ { bearerAuth: [] } ]
+      responses:
+        '202':
+          description: Код отправлен
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CodeSentResponse' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /v1/me/password:
+    put:
+      operationId: changePassword
+      summary: Сменить пароль
+      description: Остальные сессии отзываются, текущая остаётся. Ошибки — `403 wrong_password`, `422 validation_failed`, `429 rate_limited` (слишком много неверных паролей), `503 service_unavailable` (сервер перегружен — все слоты хеширования паролей заняты, повторите позже).
+      security: [ { bearerAuth: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChangePasswordRequest' }
+      responses:
+        '204': { description: Пароль изменён }
+        default: { $ref: '#/components/responses/Problem' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    Problem:
+      description: Ошибка (RFC 9457)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    Phone:
+      type: string
+      description: Номер в любом формате; без `+` считается российским. В ответах — E.164.
+      example: '+79991234567'
+
+    Code:
+      type: string
+      description: 6-значный код из SMS или письма
+      example: '123456'
+
+    RegisterStartRequest:
+      type: object
+      required: [phone]
+      properties:
+        phone: { $ref: '#/components/schemas/Phone' }
+
+    RegisterStartResponse:
+      type: object
+      required: [verification_id, expires_in, resend_after]
+      properties:
+        verification_id: { type: string, format: uuid }
+        expires_in: { type: integer, description: Сколько секунд живёт код }
+        resend_after: { type: integer, description: Через сколько секунд можно запросить новый код }
+
+    RegisterVerifyRequest:
+      type: object
+      required: [verification_id, code]
+      properties:
+        verification_id: { type: string, format: uuid }
+        code: { $ref: '#/components/schemas/Code' }
+
+    RegisterVerifyResponse:
+      type: object
+      required: [registration_token, expires_in]
+      properties:
+        registration_token: { type: string }
+        expires_in: { type: integer }
+
+    RegisterRequest:
+      type: object
+      required: [registration_token, password, email]
+      properties:
+        registration_token: { type: string }
+        password: { type: string, minLength: 8, maxLength: 128 }
+        email: { type: string, description: Email }
+        device_name: { type: string, maxLength: 100 }
+
+    LoginRequest:
+      type: object
+      required: [phone, password]
+      properties:
+        phone: { $ref: '#/components/schemas/Phone' }
+        password: { type: string }
+        device_name: { type: string, maxLength: 100 }
+
+    RefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token: { type: string }
+
+    RefreshResponse:
+      type: object
+      required: [tokens]
+      properties:
+        tokens: { $ref: '#/components/schemas/Tokens' }
+
+    LogoutRequest:
+      type: object
+      properties:
+        all_devices: { type: boolean, default: false }
+
+    ForgotPasswordRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, description: Email }
+
+    ForgotPasswordResponse:
+      type: object
+      required: [resend_after]
+      properties:
+        resend_after: { type: integer }
+
+    ResetPasswordRequest:
+      type: object
+      required: [email, code, new_password]
+      properties:
+        email: { type: string, description: Email }
+        code: { $ref: '#/components/schemas/Code' }
+        new_password: { type: string, minLength: 8, maxLength: 128 }
+
+    ChangeEmailRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, description: Email }
+        password: { type: string }
+
+    ChangeEmailResponse:
+      type: object
+      required: [user, expires_in, resend_after]
+      properties:
+        user: { $ref: '#/components/schemas/User' }
+        expires_in: { type: integer }
+        resend_after: { type: integer }
+
+    VerifyEmailRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { $ref: '#/components/schemas/Code' }
+
+    CodeSentResponse:
+      type: object
+      required: [expires_in, resend_after]
+      properties:
+        expires_in: { type: integer }
+        resend_after: { type: integer }
+
+    ChangePasswordRequest:
+      type: object
+      required: [old_password, new_password]
+      properties:
+        old_password: { type: string }
+        new_password: { type: string, minLength: 8, maxLength: 128 }
+
+    DeleteAccountRequest:
+      type: object
+      required: [password]
+      properties:
+        password: { type: string }
+
+    User:
+      type: object
+      required: [id, phone, email, email_verified, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        phone: { $ref: '#/components/schemas/Phone' }
+        email: { type: string, description: Email }
+        email_verified: { type: boolean }
+        created_at: { type: string, format: date-time }
+
+    Tokens:
+      type: object
+      required: [token_type, access_token, access_expires_in, refresh_token, refresh_expires_in]
+      properties:
+        token_type: { type: string, enum: [Bearer] }
+        access_token: { type: string }
+        access_expires_in: { type: integer, description: Секунды }
+        refresh_token: { type: string }
+        refresh_expires_in: { type: integer, description: Секунды }
+
+    AuthResult:
+      type: object
+      required: [user, tokens]
+      properties:
+        user: { $ref: '#/components/schemas/User' }
+        tokens: { $ref: '#/components/schemas/Tokens' }
+
+    FieldError:
+      type: object
+      required: [field, code]
+      properties:
+        field: { type: string, example: password }
+        code:
+          type: string
+          enum: [invalid_phone, invalid_email, too_short, too_long, required]
+
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, example: about:blank }
+        title: { type: string }
+        status: { type: integer }
+        code:
+          type: string
+          description: Стабильный машинный код ошибки. Список может пополняться, клиент должен обрабатывать неизвестный код по HTTP-статусу.
+          enum:
+            - bad_request
+            - unauthorized
+            - invalid_credentials
+            - invalid_registration_token
+            - invalid_refresh_token
+            - refresh_token_reused
+            - wrong_password
+            - phone_taken
+            - email_taken
+            - email_already_verified
+            - code_expired
+            - validation_failed
+            - invalid_code
+            - rate_limited
+            - internal_error
+            - service_unavailable
+        errors:
+          type: array
+          items: { $ref: '#/components/schemas/FieldError' }
+        attempts_left:
+          type: integer
+          description: Только для invalid_code
