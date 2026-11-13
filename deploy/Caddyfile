@@ -1,0 +1,15 @@
+# HTTPS for {$DOMAIN} with an automatically issued certificate; everything goes to the API.
+# Caddy replaces any client-supplied X-Forwarded-For with the real client address.
+{$DOMAIN} {
+	encode zstd gzip
+	# The API accepts at most 64 KiB; larger bodies are cut off here already.
+	request_body {
+		max_size 128KB
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+	reverse_proxy api:8080
+}

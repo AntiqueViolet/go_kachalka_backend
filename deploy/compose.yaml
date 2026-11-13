@@ -1,0 +1,109 @@
+# Production stack. Run from this directory: docker compose up -d --build
+# Before the first start follow README → «Развёртывание на сервере».
+name: go-kachalka
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  caddy:
+    image: caddy:2.11
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in deploy/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      backend:
+        ipv4_address: 172.30.10.10 # fixed so the API trusts X-Forwarded-For only from Caddy
+    depends_on:
+      api:
+        condition: service_healthy
+    logging: *logging
+
+  api:
+    build: ..
+    image: go-kachalka-api:latest
+    # The server drains for up to 20s on SIGTERM (shutdownTimeout); Docker's default 10s would SIGKILL it.
+    stop_grace_period: 25s
+    restart: unless-stopped
+    # The server writes nothing to disk and needs no privileges.
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    env_file: .env
+    environment:
+      APP_ENV: ${APP_ENV:-prod}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      JWT_PRIVATE_KEY_FILE: /secrets/jwt.pem
+      TRUSTED_PROXIES: 172.30.10.10 # Caddy
+    volumes:
+      - ./secrets:/secrets:ro
+    networks: [backend]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *logging
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    stop_grace_period: 60s # a clean shutdown avoids crash recovery on the next start
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in deploy/.env}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in deploy/.env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    logging: *logging
+
+  backup:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/backup.sh"]
+    environment:
+      PGHOST: postgres
+      PGDATABASE: ${POSTGRES_DB}
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+    volumes:
+      - ./backup.sh:/backup.sh:ro
+      - ./backups:/backups
+    healthcheck:
+      # Unhealthy (visible in `docker compose ps`) when the newest dump is older than 26 h.
+      test: ["CMD-SHELL", "find /backups -name 'kachalka-*.dump' -mmin -1560 | grep -q ."]
+      interval: 10m
+      timeout: 10s
+      start_period: 10m
+    networks: [backend]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *logging
+
+networks:
+  backend:
+    ipam:
+      config:
+        - subnet: 172.30.10.0/24
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
