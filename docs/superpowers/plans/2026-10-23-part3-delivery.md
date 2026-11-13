@@ -138,6 +138,8 @@ services:
 
   api:
     build: .
+    # The server drains for up to 20s on SIGTERM (shutdownTimeout); Docker's default 10s would SIGKILL it.
+    stop_grace_period: 25s
     environment:
       APP_ENV: dev
       DATABASE_URL: postgres://kachalka:kachalka@postgres:5432/kachalka?sslmode=disable
@@ -463,6 +465,8 @@ services:
   api:
     build: ..
     image: go-kachalka-api:latest
+    # The server drains for up to 20s on SIGTERM (shutdownTimeout); Docker's default 10s would SIGKILL it.
+    stop_grace_period: 25s
     restart: unless-stopped
     env_file: .env
     environment:
@@ -1079,11 +1083,12 @@ docker compose start api
 ## Безопасность (кратко)
 
 - Пароли — argon2id (параметры OWASP), число одновременных хэширований ограничено.
-- Коды — 6 цифр, в БД только HMAC, 5 попыток, 10 минут, лимиты на отправку.
+- Коды — 6 цифр, в БД только HMAC, 5 попыток, 10 минут, лимиты на отправку (параллельные запросы их не обходят; недоставленный код лимит не тратит).
 - Refresh-токены не хранятся вовсе: сервер вычисляет их из сессии и секретного ключа; повторное использование старого токена отзывает сессию.
-- Одинаковый ответ и время ответа для неизвестного номера и неверного пароля; `password/forgot` не раскрывает, есть ли email.
+- Одинаковый ответ и время ответа для неизвестного номера и неверного пароля; `password/forgot` (письмо уходит в фоне) и `password/reset` (одна ошибка `invalid_code` на всё) не раскрывают, есть ли email.
+- Неверный текущий пароль при смене пароля/email и удалении аккаунта ограничен так же, как неудачные входы.
 - `X-Forwarded-For` учитывается только от Caddy; тело запроса ≤ 64 КиБ; таймауты сервера; `Cache-Control: no-store`.
-- Пароли, коды (кроме dev-лога SMS), токены и секреты не пишутся в логи.
+- Пароли, коды (кроме dev: лог SMS и писем при пустом `SMTP_HOST`), токены и секреты не пишутся в логи.
 
 ## Частые проблемы
 
